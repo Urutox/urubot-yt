@@ -1,0 +1,10 @@
+{
+  "bot_name": "Urubot YT",
+  "ping": "<@&820660324498931722>",
+  "message": "{ping} **{channel}** hat ein neues Video hochgeladen: **{title}**\n{url}",
+  "channels": [
+    { "url": "https://www.youtube.com/c/urutox" },
+    { "url": "https://www.youtube.com/@MaxUrutox" },
+    { "url": "https://www.youtube.com/@UrutoxReactions" }
+  ]
+}
