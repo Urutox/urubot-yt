@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -44,6 +45,31 @@ def http_get(url):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read().decode("utf-8", errors="replace")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def is_short(video_id, url):
+    """True, wenn das Video ein YouTube Short ist.
+    youtube.com/shorts/<id> antwortet bei Shorts mit 200, bei normalen Videos
+    mit einer Weiterleitung auf /watch."""
+    if "/shorts/" in url:
+        return True
+    req = urllib.request.Request(f"https://www.youtube.com/shorts/{video_id}", headers=UA)
+    try:
+        with _no_redirect_opener.open(req, timeout=20) as r:
+            return r.status == 200
+    except urllib.error.HTTPError:
+        return False  # 3xx (Weiterleitung) = normales Video
+    except Exception as e:
+        print(f"  Konnte nicht prüfen, ob {video_id} ein Short ist ({e}) – wird als Video behandelt.")
+        return False
 
 
 def resolve_channel_id(entry, state):
@@ -128,6 +154,7 @@ def main():
         sys.exit("Fehler: config.json fehlt oder enthält keine Kanäle.")
     global BOT_NAME
     BOT_NAME = config.get("bot_name", "")
+    skip_shorts = config.get("skip_shorts", True)
     state = load_json(STATE_FILE, {})
     seen_all = state.setdefault("seen", {})
     errors = 0
@@ -143,10 +170,12 @@ def main():
             continue
 
         if test_mode:
-            if videos:
-                vid, title, url, author = videos[0]
+            for vid, title, url, author in videos:
+                if skip_shorts and is_short(vid, url):
+                    continue
                 post_discord(webhook, "🧪 Test: " + format_message(config, entry, title, url, author))
                 print(f"[{label}] Testnachricht gesendet: {title}")
+                break
             continue
 
         first_run = cid not in seen_all
@@ -159,6 +188,10 @@ def main():
         else:
             new = [v for v in videos if v[0] not in seen]
             for vid, title, url, author in reversed(new):  # älteste zuerst posten
+                if skip_shorts and is_short(vid, url):
+                    seen.insert(0, vid)
+                    print(f"[{label}] Short übersprungen: {title}")
+                    continue
                 post_discord(webhook, format_message(config, entry, title, url, author))
                 seen.insert(0, vid)
                 print(f"[{label}] Gepostet: {title}")
