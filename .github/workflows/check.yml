@@ -1,0 +1,46 @@
+name: YouTube zu Discord
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # alle 10 Minuten (GitHub kann sich ein paar Minuten verspäten)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "Testnachricht mit dem neuesten Video jedes Kanals senden"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yt-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Kanäle prüfen
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ "${{ inputs.test }}" = "true" ]; then
+            python check.py --test
+          else
+            python check.py
+          fi
+
+      - name: Gesehene Videos speichern
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json 2>/dev/null || true
+          git diff --staged --quiet || (git commit -m "Status aktualisiert" && git push)
