@@ -117,10 +117,10 @@ def fetch_videos(channel_id):
 BOT_NAME = ""
 
 
-def post_discord(webhook, content):
+def post_discord(webhook, content, ping=True):
     payload = {
         "content": content,
-        "allowed_mentions": {"parse": ["roles", "everyone", "users"]},
+        "allowed_mentions": {"parse": ["roles", "everyone", "users"] if ping else []},
     }
     if BOT_NAME:
         payload["username"] = BOT_NAME
@@ -134,9 +134,9 @@ def post_discord(webhook, content):
             raise RuntimeError(f"Discord antwortete mit {r.status}")
 
 
-def format_message(config, entry, title, url, author):
+def format_message(config, entry, title, url, author, with_ping=True):
     template = entry.get("message") or config.get("message", "{ping} {url}")
-    ping = entry.get("ping", config.get("ping", ""))
+    ping = entry.get("ping", config.get("ping", "")) if with_ping else ""
     return template.format(
         ping=ping, title=title, url=url,
         channel=entry.get("name") or author,
@@ -158,6 +158,7 @@ def main():
     state = load_json(STATE_FILE, {})
     seen_all = state.setdefault("seen", {})
     errors = 0
+    test_sent = False
 
     for entry in config["channels"]:
         label = entry.get("name") or entry.get("url") or entry.get("handle") or entry.get("id")
@@ -170,11 +171,16 @@ def main():
             continue
 
         if test_mode:
+            # Testmodus: genau EINE Nachricht insgesamt, ohne Ping
+            if test_sent:
+                continue
             for vid, title, url, author in videos:
                 if skip_shorts and is_short(vid, url):
                     continue
-                post_discord(webhook, "🧪 Test: " + format_message(config, entry, title, url, author))
+                msg = format_message(config, entry, title, url, author, with_ping=False)
+                post_discord(webhook, "🧪 Test (ohne Ping): " + msg, ping=False)
                 print(f"[{label}] Testnachricht gesendet: {title}")
+                test_sent = True
                 break
             continue
 
