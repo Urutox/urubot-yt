@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -19,6 +20,7 @@ CONFIG_FILE = "config.json"
 STATE_FILE = "state.json"
 MAX_SEEN = 50  # wie viele Video-IDs pro Kanal gemerkt werden
 KEEPALIVE_DAYS = 30  # GitHub pausiert Zeitpläne nach 60 Tagen ohne Commit
+FAIL_ALERT_AFTER = 6  # erst nach so vielen komplett fehlgeschlagenen Läufen am Stück als Fehler melden
 
 NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -41,10 +43,17 @@ def save_json(path, data):
         f.write("\n")
 
 
-def http_get(url):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return r.read().decode("utf-8", errors="replace")
+def http_get(url, tries=3):
+    """Lädt eine Seite. Bei kurzen YouTube-Aussetzern bis zu 3 Versuche mit Pause."""
+    for attempt in range(1, tries + 1):
+        try:
+            req = urllib.request.Request(url, headers=UA)
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.read().decode("utf-8", errors="replace")
+        except Exception:
+            if attempt == tries:
+                raise
+            time.sleep(5 * attempt)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -145,6 +154,7 @@ def format_message(config, entry, title, url, author, with_ping=True):
 
 def main():
     test_mode = "--test" in sys.argv
+    silent_mode = "--silent" in sys.argv  # neue Videos nur merken, nichts posten
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
     if not webhook:
         sys.exit("Fehler: DISCORD_WEBHOOK_URL ist nicht gesetzt (GitHub Secret fehlt).")
@@ -194,6 +204,10 @@ def main():
         else:
             new = [v for v in videos if v[0] not in seen]
             for vid, title, url, author in reversed(new):  # älteste zuerst posten
+                if silent_mode:
+                    seen.insert(0, vid)
+                    print(f"[{label}] Still gemerkt (nicht gepostet): {title}")
+                    continue
                 if skip_shorts and is_short(vid, url):
                     seen.insert(0, vid)
                     print(f"[{label}] Short übersprungen: {title}")
@@ -206,6 +220,11 @@ def main():
 
         seen_all[cid] = seen[:MAX_SEEN]
 
+    # Wenn YouTube komplett nicht erreichbar war: nicht sofort als Fehler melden,
+    # sondern erst, wenn das mehrere Läufe hintereinander passiert.
+    all_failed = errors == len(config["channels"])
+    state["fail_streak"] = state.get("fail_streak", 0) + 1 if all_failed else 0
+
     if not test_mode:
         # Keepalive: alle 30 Tage einen Commit erzeugen, damit GitHub den Zeitplan nicht pausiert
         today = datetime.now(timezone.utc).date()
@@ -214,8 +233,10 @@ def main():
             state["keepalive"] = today.isoformat()
         save_json(STATE_FILE, state)
 
-    if errors == len(config["channels"]):
-        sys.exit("Alle Kanäle sind fehlgeschlagen.")
+    if all_failed:
+        if state["fail_streak"] >= FAIL_ALERT_AFTER:
+            sys.exit(f"YouTube war {state['fail_streak']} Läufe hintereinander nicht erreichbar.")
+        print(f"YouTube gerade nicht erreichbar ({state['fail_streak']}x am Stück) – nächster Lauf holt alles nach.")
 
 
 if __name__ == "__main__":
