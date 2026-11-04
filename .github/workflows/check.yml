@@ -9,6 +9,10 @@ on:
         description: "Testnachricht mit dem neuesten Video jedes Kanals senden"
         type: boolean
         default: false
+      silent:
+        description: "Still: aktuelle Videos nur merken, nichts in Discord posten"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -22,9 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -34,6 +38,8 @@ jobs:
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
             python check.py --test
+          elif [ "${{ inputs.silent }}" = "true" ]; then
+            python check.py --silent
           else
             python check.py
           fi
