@@ -52,5 +52,6 @@
     "https://www.youtube.com/@MaxUrutox": "UC9O9H8MNx8MybfFo4v6YF2A",
     "https://www.youtube.com/@UrutoxReactions": "UCfGDwqlT_Re5X9EbTZeQs-A"
   },
-  "keepalive": "2026-10-31"
+  "keepalive": "2026-10-31",
+  "fail_streak": 0
 }
