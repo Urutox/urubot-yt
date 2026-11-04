@@ -45,8 +45,9 @@ jobs:
           fi
 
       - name: Gesehene Videos speichern
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json 2>/dev/null || true
-          git diff --staged --quiet || (git commit -m "Status aktualisiert" && git push)
+          git diff --staged --quiet || (git commit -m "Status aktualisiert" && (git push || (git pull --rebase && git push)))
