@@ -234,7 +234,8 @@ def main():
         save_json(STATE_FILE, state)
 
     if all_failed:
-        if state["fail_streak"] >= FAIL_ALERT_AFTER:
+        # Genau EINE Warnung pro Ausfall (beim 6. Fehlversuch am Stück), danach still weiterprobieren.
+        if state["fail_streak"] == FAIL_ALERT_AFTER:
             sys.exit(f"YouTube war {state['fail_streak']} Läufe hintereinander nicht erreichbar.")
         print(f"YouTube gerade nicht erreichbar ({state['fail_streak']}x am Stück) – nächster Lauf holt alles nach.")
 
