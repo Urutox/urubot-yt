@@ -1,8 +1,7 @@
 name: YouTube zu Discord
 
+# Gestartet alle 10 Minuten von cron-job.org (GitHubs eigener Zeitplan war zu unzuverlässig).
 on:
-  schedule:
-    - cron: "*/10 * * * *"   # alle 10 Minuten (GitHub kann sich ein paar Minuten verspäten)
   workflow_dispatch:
     inputs:
       test:
@@ -27,6 +26,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main   # immer den neuesten Stand holen, nie einen veralteten
 
       - uses: actions/setup-python@v6
         with:
@@ -35,6 +36,7 @@ jobs:
       - name: Kanäle prüfen
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
             python check.py --test
