@@ -1,6 +1,6 @@
 """
 YouTube -> Discord Notifier
-Prüft die RSS-Feeds der YouTube-Kanäle aus config.json und postet neue
+Prüft die YouTube-Kanäle (offizielle API, ersatzweise RSS-Feed) aus config.json und postet neue
 Videos mit Ping per Discord-Webhook. Läuft per GitHub Actions nach Zeitplan.
 
 Nur Python-Standardbibliothek, keine Installation nötig.
@@ -8,6 +8,7 @@ Nur Python-Standardbibliothek, keine Installation nötig.
 
 import json
 import os
+import urllib.parse
 import re
 import sys
 import time
@@ -108,8 +109,34 @@ def resolve_channel_id(entry, state):
     return m.group(1)
 
 
-def fetch_videos(channel_id):
-    """Liste von (video_id, titel, url, kanalname), neueste zuerst."""
+def fetch_videos_api(channel_id, api_key):
+    """Offizielle YouTube Data API: Upload-Playlist des Kanals (kostet 1 Einheit pro Abruf)."""
+    params = urllib.parse.urlencode({
+        "part": "snippet,status",
+        "playlistId": "UU" + channel_id[2:],
+        "maxResults": 15,
+        "key": api_key,
+    })
+    data = json.loads(http_get(f"https://www.googleapis.com/youtube/v3/playlistItems?{params}"))
+    videos = []
+    for item in data.get("items", []):
+        if item.get("status", {}).get("privacyStatus") != "public":
+            continue  # private/nicht gelistete Videos ignorieren (werden gepostet, sobald öffentlich)
+        sn = item["snippet"]
+        vid = sn["resourceId"]["videoId"]
+        videos.append((vid, sn.get("title", ""), f"https://www.youtube.com/watch?v={vid}",
+                       sn.get("videoOwnerChannelTitle") or sn.get("channelTitle", "")))
+    return videos
+
+
+def fetch_videos(channel_id, api_key=""):
+    """(Liste von (video_id, titel, url, kanalname), Quelle), neueste zuerst.
+    Nutzt die offizielle API, wenn ein Schlüssel da ist, sonst (oder bei API-Fehler) den RSS-Feed."""
+    if api_key:
+        try:
+            return fetch_videos_api(channel_id, api_key), "api"
+        except Exception as e:
+            print(f"  API-Fehler ({e}) – versuche RSS-Feed.")
     xml = http_get(f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
     root = ET.fromstring(xml)
     author = root.findtext("atom:title", default="", namespaces=NS)
@@ -120,7 +147,7 @@ def fetch_videos(channel_id):
         link = e.find("atom:link", NS)
         url = link.get("href") if link is not None else f"https://www.youtube.com/watch?v={vid}"
         videos.append((vid, title, url, author))
-    return videos
+    return videos, "rss"
 
 
 BOT_NAME = ""
@@ -156,6 +183,7 @@ def main():
     test_mode = "--test" in sys.argv
     silent_mode = "--silent" in sys.argv  # neue Videos nur merken, nichts posten
     webhook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if not webhook:
         sys.exit("Fehler: DISCORD_WEBHOOK_URL ist nicht gesetzt (GitHub Secret fehlt).")
 
@@ -174,7 +202,7 @@ def main():
         label = entry.get("name") or entry.get("url") or entry.get("handle") or entry.get("id")
         try:
             cid = resolve_channel_id(entry, state)
-            videos = fetch_videos(cid)
+            videos, source = fetch_videos(cid, api_key)
         except Exception as ex:
             print(f"[{label}] Fehler beim Abrufen: {ex}")
             errors += 1
@@ -196,11 +224,17 @@ def main():
 
         first_run = cid not in seen_all
         seen = seen_all.setdefault(cid, [])
+        api_ready = state.setdefault("api_ready", [])
+        first_api = source == "api" and cid not in api_ready
+        if source == "api" and cid not in api_ready:
+            api_ready.append(cid)
 
-        if first_run:
-            # Beim ersten Lauf nur merken, nichts posten (kein Spam alter Videos)
-            seen.extend(v[0] for v in videos)
-            print(f"[{label}] Erster Lauf: {len(videos)} vorhandene Videos gemerkt.")
+        if first_run or first_api:
+            # Erster Lauf (bzw. erster Lauf mit der API): nur merken, nichts posten.
+            # Aber: was schon vorher gemerkt war, bleibt gemerkt.
+            new_ids = [v[0] for v in videos if v[0] not in seen]
+            seen[:0] = new_ids
+            print(f"[{label}] Abgleich ({source}): {len(new_ids)} Videos still gemerkt.")
         else:
             new = [v for v in videos if v[0] not in seen]
             for vid, title, url, author in reversed(new):  # älteste zuerst posten
@@ -224,6 +258,11 @@ def main():
     # sondern erst, wenn das mehrere Läufe hintereinander passiert.
     all_failed = errors == len(config["channels"])
     state["fail_streak"] = state.get("fail_streak", 0) + 1 if all_failed else 0
+    if not all_failed:
+        state["alerted"] = False
+    should_alert = all_failed and state["fail_streak"] >= FAIL_ALERT_AFTER and not state.get("alerted")
+    if should_alert:
+        state["alerted"] = True  # merken, damit pro Ausfall nur EINE Mail kommt
 
     if not test_mode:
         # Keepalive: alle 30 Tage einen Commit erzeugen, damit GitHub den Zeitplan nicht pausiert
@@ -234,8 +273,8 @@ def main():
         save_json(STATE_FILE, state)
 
     if all_failed:
-        # Genau EINE Warnung pro Ausfall (beim 6. Fehlversuch am Stück), danach still weiterprobieren.
-        if state["fail_streak"] == FAIL_ALERT_AFTER:
+        # Genau EINE Warnung pro Ausfall, danach still weiterprobieren.
+        if should_alert:
             sys.exit(f"YouTube war {state['fail_streak']} Läufe hintereinander nicht erreichbar.")
         print(f"YouTube gerade nicht erreichbar ({state['fail_streak']}x am Stück) – nächster Lauf holt alles nach.")
 
