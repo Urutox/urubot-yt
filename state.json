@@ -54,5 +54,11 @@
     "https://www.youtube.com/@UrutoxReactions": "UCfGDwqlT_Re5X9EbTZeQs-A"
   },
   "keepalive": "2026-10-31",
-  "fail_streak": 2
+  "fail_streak": 0,
+  "api_ready": [
+    "UCIfeBu5UyAUnAl0HKcD4LZg",
+    "UC9O9H8MNx8MybfFo4v6YF2A",
+    "UCfGDwqlT_Re5X9EbTZeQs-A"
+  ],
+  "alerted": false
 }
